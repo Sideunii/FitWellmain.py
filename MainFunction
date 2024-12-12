@@ -1,0 +1,269 @@
+import customtkinter
+from tkinter import *
+from tkinter import messagebox
+import mysql.connector
+
+# Database connection
+db_connection = mysql.connector.connect(
+    host="localhost",
+    user="root",
+    database="bmidb"
+)
+cursor = db_connection.cursor()
+
+# Create table for BMI records
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS bmi_records (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(255),
+    weight FLOAT,
+    height FLOAT,
+    bmi FLOAT,
+    weight_unit VARCHAR(10),
+    height_unit VARCHAR(10)
+)
+""")
+db_connection.commit()
+
+app = customtkinter.CTk()
+app.title('FitWell')
+app.geometry('925x500+300+200')
+app.config(bg='#000')
+
+# Disable resizing and maximize button
+app.resizable(False, False)  # Disables both width and height resizing
+
+font1 = ('Arial', 30, 'bold')
+font2 = ('Arial', 18, 'bold')
+font3 = ('Arial', 25, 'bold')
+
+# Function to calculate BMI and save to database
+def calculate_bmi():
+    try:
+        name = name_entry.get()
+        height = float(height_entry.get())
+        weight = float(weight_entry.get())
+        weight_unit = variable1.get()
+        height_unit = variable2.get()
+
+        if not name:
+            messagebox.showerror('Error', 'Please enter your name!')
+            return
+
+        if height_unit == "ft":
+            height *= 30.48  # Convert feet to centimeters
+        if weight_unit == "ibs":
+            weight *= 0.453592  # Convert pounds to kilograms
+
+        bmi = weight / ((height / 100) ** 2)  # Calculate BMI
+        # Evaluate the BMI result
+        if bmi < 18.5:
+            category = "Underweight"
+        elif 18.5 <= bmi < 24.9:
+            category = "Normal weight"
+        elif 25 <= bmi < 29.9:
+            category = "Overweight"
+        else:
+            category = "Obese"
+
+        result_label.configure(text=f"Your BMI is: {bmi:.1f} ({category})")
+
+        # Save to database
+        cursor.execute("""
+        INSERT INTO bmi_records (name, weight, height, bmi, weight_unit, height_unit)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        """, (name, weight, height, bmi, weight_unit, height_unit))
+        db_connection.commit()
+
+        messagebox.showinfo('Success', f'BMI saved successfully! You are {category}.')
+    except ValueError:
+        messagebox.showerror('Error', 'Enter a valid number!')
+    except ZeroDivisionError:
+        messagebox.showerror('Error', 'Height cannot be 0!')
+
+# Function to view all records
+def view_records():
+    records_window = Toplevel(app)
+    records_window.title("BMI Records")
+    records_window.geometry("800x400")
+    records_window.configure(bg="white")
+
+    # Title for records
+    Label(records_window, text="Saved BMI Records", font=font2, bg="white").pack(pady=10)
+
+    # Frame for displaying records
+    records_frame = Frame(records_window, bg="white")
+    records_frame.pack(fill=BOTH, expand=True, pady=10)
+
+    # Adding a scrollbar
+    scrollbar = Scrollbar(records_frame)
+    scrollbar.pack(side=RIGHT, fill=Y)
+
+    listbox = Listbox(records_frame, font=font2, bg="white", fg="black", yscrollcommand=scrollbar.set, width=90)
+    listbox.pack(side=LEFT, fill=BOTH, expand=True)
+    scrollbar.config(command=listbox.yview)
+
+    # Fetch and display records
+    cursor.execute("SELECT id, name, weight, height, bmi, weight_unit, height_unit FROM bmi_records")
+    records = cursor.fetchall()
+
+    if not records:
+        listbox.insert(END, "No records found!")
+    else:
+        listbox.insert(END, f"{'ID':<5} {'Name':<15} {'Weight':<10} {'Height':<10} {'BMI':<10}")
+        listbox.insert(END, "-" * 60)
+        for record in records:
+            record_id, name, weight, height, bmi, weight_unit, height_unit = record
+            listbox.insert(
+                END, f"{record_id:<5} {name:<15} {weight:<10.2f} {weight_unit:<5} {height:<10.2f} {height_unit:<5} {bmi:<10.2f}"
+            )
+
+    # Add a button to trigger the update record window
+    Button(records_window, text="Update Record", font=font2, command=lambda: update_record_window(listbox), bg="blue", fg="white").pack(pady=5)
+
+# Function to update a selected record
+def update_record_window(listbox):
+    selected_item = listbox.curselection()
+    if not selected_item:
+        messagebox.showerror("Error", "Please select a record to update!")
+        return
+
+    selected_text = listbox.get(selected_item[0])
+    record_id = selected_text.split()[0]  # Extract the record ID
+
+    update_window = Toplevel(app)
+    update_window.title("Update Record")
+    update_window.geometry("400x300")
+    update_window.configure(bg="white")
+
+    Label(update_window, text="Update Record", font=font2, bg="white").pack(pady=10)
+
+    # Fetch current record details
+    cursor.execute("SELECT name, weight, height FROM bmi_records WHERE id = %s", (record_id,))
+    record = cursor.fetchone()
+
+    if record:
+        name, weight, height = record
+
+        # Name Field
+        Label(update_window, text="Name:", font=font2, bg="white").place(x=20, y=60)
+        new_name = Entry(update_window, font=font2, width=20)
+        new_name.place(x=100, y=60)
+        new_name.insert(0, name)
+
+        # Weight Field
+        Label(update_window, text="Weight:", font=font2, bg="white").place(x=20, y=100)
+        new_weight = Entry(update_window, font=font2, width=20)
+        new_weight.place(x=100, y=100)
+        new_weight.insert(0, weight)
+
+        # Height Field
+        Label(update_window, text="Height:", font=font2, bg="white").place(x=20, y=140)
+        new_height = Entry(update_window, font=font2, width=20)
+        new_height.place(x=100, y=140)
+        new_height.insert(0, height)
+
+        def update_record():
+            updated_name = new_name.get()
+            updated_weight = float(new_weight.get())
+            updated_height = float(new_height.get())
+            updated_bmi = updated_weight / ((updated_height / 100) ** 2)
+
+            # Update the record in the database
+            cursor.execute("""
+                UPDATE bmi_records
+                SET name = %s, weight = %s, height = %s, bmi = %s
+                WHERE id = %s
+            """, (updated_name, updated_weight, updated_height, updated_bmi, record_id))
+            db_connection.commit()
+
+            messagebox.showinfo("Success", "Record updated successfully!")
+            update_window.destroy()
+
+        Button(update_window, text="Update", font=font2, command=update_record, bg="green", fg="white").place(x=150, y=200)
+
+# Function to delete all records
+def delete_records():
+    response = messagebox.askyesno("Delete Records", "Are you sure you want to delete all records?")
+    if response:
+        cursor.execute("DELETE FROM bmi_records")
+        db_connection.commit()
+        cursor.execute("ALTER TABLE bmi_records AUTO_INCREMENT = 1")  # Reset the auto-increment counter
+        messagebox.showinfo('Success', 'All records deleted successfully!') 
+
+# Logout function
+def logout():
+    response = messagebox.askyesno("Logout", "Are you sure you want to logout?")
+    if response:
+        app.quit()  # Exit the application
+        
+# Title Label
+title_label = customtkinter.CTkLabel(app, font=font1, bg_color='black', text='FitWell', text_color='#fff')
+title_label.place(x=400, y=20)
+
+# Name Label and Entry
+name_label = customtkinter.CTkLabel(app, font=font2, bg_color='black', text='Name:', text_color='#fff')
+name_label.place(x=300, y=80)
+
+name_entry = customtkinter.CTkEntry(app, font=font2, bg_color='black', text_color='#000', fg_color='#fff', border_color='#fff', width=300)
+name_entry.place(x=300, y=110)
+
+# Weight Label and Entry
+weight_label = customtkinter.CTkLabel(app, font=font2, bg_color='black', text='Weight:', text_color='#fff')
+weight_label.place(x=300, y=150)
+
+weight_entry = customtkinter.CTkEntry(app, font=font2, text_color='#000', fg_color='#fff', border_color='#fff', width=200)
+weight_entry.place(x=300, y=180)
+
+# Height Label and Entry
+height_label = customtkinter.CTkLabel(app, font=font2, bg_color='black', text='Height:', text_color='#fff')
+height_label.place(x=300, y=220)
+
+height_entry = customtkinter.CTkEntry(app, font=font2, text_color='#000', fg_color='#fff', border_color='#fff', width=200)
+height_entry.place(x=300, y=250)
+
+# Dropdowns for weight and height units
+weight_options = ['kg', 'ibs']
+height_options = ['cm', 'ft']
+variable1 = StringVar()
+variable2 = StringVar()
+
+weight_option = customtkinter.CTkComboBox(app, font=font2, text_color='#000', fg_color='#fff', 
+                                          dropdown_hover_color='#06911f', values=weight_options, variable=variable1, width=80)
+weight_option.place(x=520, y=180)
+weight_option.set('kg')
+
+height_option = customtkinter.CTkComboBox(app, font=font2, text_color='#000', fg_color='#fff', 
+                                          dropdown_hover_color='#06911f', values=height_options, variable=variable2, width=80)
+height_option.place(x=520, y=250)
+height_option.set('cm')
+
+# Calculate Button
+calculate_button = customtkinter.CTkButton(app, command=calculate_bmi, font=font2, text_color='#fff', 
+                                           text='Calculate BMI', fg_color='#06911f', cursor='hand2', corner_radius=5, width=200)
+calculate_button.place(x=350, y=300)
+
+# View Records Button
+view_button = customtkinter.CTkButton(app, command=view_records, font=font2, text_color='#fff', 
+                                      text='View Records', fg_color='#0066cc', cursor='hand2', corner_radius=5, width=200)
+view_button.place(x=150, y=400)
+
+# Delete Records Button
+delete_button = customtkinter.CTkButton(app, command=delete_records, font=font2, text_color='#fff', 
+                                        text='Delete Records', fg_color='#cc0000', cursor='hand2', corner_radius=5, width=200)
+delete_button.place(x=550, y=400)
+
+# Logout Button
+logout_button = customtkinter.CTkButton(app, command=logout, font=font2, text_color='#fff', 
+                                        text='Logout', fg_color='#ff4c4c', cursor='hand2', corner_radius=5, width=200)
+logout_button.place(x=350, y=450)
+
+# Result Label
+result_label = customtkinter.CTkLabel(app, text='', font=font3, text_color='#fff')
+result_label.place(x=300, y=350)
+
+app.mainloop()
+
+# Close the database connection
+cursor.close()
+db_connection.close()
